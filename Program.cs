@@ -9,6 +9,7 @@ namespace JetFighterCombatSim
         public int Health { get; set; }
         public int AttackPower { get; set; }
         public int TotalDamageDealt { get; private set; }
+        private static Random random = new Random();
 
         public JetFighter(string name, int health, int attackPower)
         {
@@ -20,10 +21,11 @@ namespace JetFighterCombatSim
 
         public void Attack(JetFighter target, List<AttackDetail> attackDetails)
         {
-            target.Health -= AttackPower;
-            TotalDamageDealt += AttackPower;
-            attackDetails.Add(new AttackDetail(Name, target.Name, AttackPower, target.Health));
-            Console.WriteLine($"{Name} attacks {target.Name} for {AttackPower} damage.");
+            int damage = random.Next(AttackPower - 5, AttackPower + 6); // Random damage within a range
+            target.Health -= damage;
+            TotalDamageDealt += damage;
+            attackDetails.Add(new AttackDetail(Name, target.Name, damage, target.Health));
+            Console.WriteLine($"{Name} attacks {target.Name} for {damage} damage.");
         }
     }
 

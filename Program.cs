@@ -27,6 +27,15 @@ namespace JetFighterCombatSim
             attackDetails.Add(new AttackDetail(Name, target.Name, damage, target.Health));
             Console.WriteLine($"{Name} attacks {target.Name} for {damage} damage.");
         }
+
+        public void SpecialAttack(JetFighter target, List<AttackDetail> attackDetails)
+        {
+            int damage = random.Next(AttackPower, AttackPower + 15); // Special attack with higher damage
+            target.Health -= damage;
+            TotalDamageDealt += damage;
+            attackDetails.Add(new AttackDetail(Name, target.Name, damage, target.Health));
+            Console.WriteLine($"{Name} uses special attack on {target.Name} for {damage} damage.");
+        }
     }
 
     class AttackDetail
@@ -49,36 +58,82 @@ namespace JetFighterCombatSim
     {
         static void Main(string[] args)
         {
-            JetFighter jet1 = new JetFighter("F-35", 100, 20);
-            JetFighter jet2 = new JetFighter("Su-35", 100, 15);
+            Console.WriteLine("Choose your jet:");
+            Console.WriteLine("1. F-35 (Health: 100, Attack Power: 20)");
+            Console.WriteLine("2. Su-35 (Health: 100, Attack Power: 15)");
+            int choice = int.Parse(Console.ReadLine());
+
+            JetFighter playerJet;
+            JetFighter enemyJet;
+
+            if (choice == 1)
+            {
+                playerJet = new JetFighter("F-35", 100, 20);
+                enemyJet = new JetFighter("Su-35", 100, 15);
+            }
+            else
+            {
+                playerJet = new JetFighter("Su-35", 100, 15);
+                enemyJet = new JetFighter("F-35", 100, 20);
+            }
+
             List<AttackDetail> attackDetails = new List<AttackDetail>();
 
-            while (jet1.Health > 0 && jet2.Health > 0)
+            while (playerJet.Health > 0 && enemyJet.Health > 0)
             {
-                jet1.Attack(jet2, attackDetails);
-                if (jet2.Health <= 0)
+                ShowMenu();
+                int actionChoice = int.Parse(Console.ReadLine());
+
+                if (actionChoice == 1)
                 {
-                    Console.WriteLine($"{jet2.Name} is destroyed!");
+                    playerJet.Attack(enemyJet, attackDetails);
+                }
+                else if (actionChoice == 2)
+                {
+                    playerJet.SpecialAttack(enemyJet, attackDetails);
+                }
+
+                if (enemyJet.Health <= 0)
+                {
+                    Console.WriteLine($"{enemyJet.Name} is destroyed!");
                     break;
                 }
 
-                jet2.Attack(jet1, attackDetails);
-                if (jet1.Health <= 0)
+                enemyJet.Attack(playerJet, attackDetails);
+                if (playerJet.Health <= 0)
                 {
-                    Console.WriteLine($"{jet1.Name} is destroyed!");
+                    Console.WriteLine($"{playerJet.Name} is destroyed!");
                     break;
                 }
 
-                Console.WriteLine($"{jet1.Name} Health: {jet1.Health}, {jet2.Name} Health: {jet2.Health}");
+                PostEncounterMechanics(playerJet, enemyJet);
+
+                Console.WriteLine($"{playerJet.Name} Health: {playerJet.Health}, {enemyJet.Name} Health: {enemyJet.Health}");
                 Console.WriteLine("Press Enter to continue...");
                 Console.ReadLine();
             }
 
             Console.WriteLine("Combat simulation ended.");
-            DisplayBattleSummary(attackDetails, jet1, jet2);
+            DisplayBattleSummary(attackDetails, playerJet, enemyJet);
         }
 
-        static void DisplayBattleSummary(List<AttackDetail> attackDetails, JetFighter jet1, JetFighter jet2)
+        static void ShowMenu()
+        {
+            Console.WriteLine("Choose an action:");
+            Console.WriteLine("1. Attack");
+            Console.WriteLine("2. Special Attack");
+        }
+
+        static void PostEncounterMechanics(JetFighter playerJet, JetFighter enemyJet)
+        {
+            Console.WriteLine("Post-Encounter Mechanics:");
+            Console.WriteLine($"Your jet: {playerJet.Name}, Health: {playerJet.Health}");
+            Console.WriteLine($"Enemy jet: {enemyJet.Name}, Health: {enemyJet.Health}");
+            Console.WriteLine("Press Enter to continue...");
+            Console.ReadLine();
+        }
+
+        static void DisplayBattleSummary(List<AttackDetail> attackDetails, JetFighter playerJet, JetFighter enemyJet)
         {
             Console.WriteLine("\nBattle Summary:");
             Console.WriteLine("Attacker\tTarget\t\tDamage\tTarget Health After Attack");
@@ -87,9 +142,9 @@ namespace JetFighterCombatSim
                 Console.WriteLine($"{detail.Attacker}\t\t{detail.Target}\t\t{detail.Damage}\t{detail.TargetHealthAfterAttack}");
             }
 
-            Console.WriteLine($"\nTotal Damage Dealt:");
-            Console.WriteLine($"{jet1.Name}: {jet1.TotalDamageDealt}");
-            Console.WriteLine($"{jet2.Name}: {jet2.TotalDamageDealt}");
+            Console.WriteLine("\nTotal Damage Dealt:");
+            Console.WriteLine($"{playerJet.Name}: {playerJet.TotalDamageDealt}");
+            Console.WriteLine($"{enemyJet.Name}: {enemyJet.TotalDamageDealt}");
         }
     }
 }

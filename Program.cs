@@ -43,6 +43,13 @@ namespace JetFighterCombatSim
         }
     }
 
+    public enum EnemyStrategy
+    {
+        Aggressive,
+        Defensive,
+        Evasive
+    }
+
     public class JetFighter
     {
         public string Name { get; set; }
@@ -81,6 +88,21 @@ namespace JetFighterCombatSim
                 Weapons.Add(WeaponType.GSh301, new Weapon(WeaponType.GSh301, "GSh-30-1", 30, 50, 500, 1, false));
             }
         }
+
+        public Weapon SelectWeapon(EnemyStrategy strategy)
+        {
+            switch (strategy)
+            {
+                case EnemyStrategy.Aggressive:
+                    return Weapons.Values.OrderByDescending(w => w.BaseDamage).FirstOrDefault(w => w.Quantity > 0) ?? new Weapon(WeaponType.M61A2_Vulcan, "Default Weapon", 0, 0, 0, 0, false);
+                case EnemyStrategy.Defensive:
+                    return Weapons.Values.OrderBy(w => w.Quantity).FirstOrDefault(w => w.Quantity > 0) ?? new Weapon(WeaponType.M61A2_Vulcan, "Default Weapon", 0, 0, 0, 0, false);
+                case EnemyStrategy.Evasive:
+                    return Weapons.Values.OrderBy(w => w.Range).FirstOrDefault(w => w.Quantity > 0) ?? new Weapon(WeaponType.M61A2_Vulcan, "Default Weapon", 0, 0, 0, 0, false);
+                default:
+                    return Weapons.Values.FirstOrDefault(w => w.Quantity > 0) ?? new Weapon(WeaponType.M61A2_Vulcan, "Default Weapon", 0, 0, 0, 0, false);
+            }
+        }
     }
 
     public class AttackDetail
@@ -102,6 +124,15 @@ namespace JetFighterCombatSim
     class Program
     {
         private static Random random = new Random();
+
+        private static int CalculateDamage(Weapon weapon)
+        {
+            // Randomize damage within a range of ±10% of the base damage
+            int minDamage = (int)(weapon.BaseDamage * 0.9);
+            int maxDamage = (int)(weapon.BaseDamage * 1.1);
+            return random.Next(minDamage, maxDamage + 1) * weapon.Accuracy / 100;
+        }
+
         static void Main(string[] args)
         {
             Console.WriteLine("Choose your jet:");
@@ -176,7 +207,8 @@ namespace JetFighterCombatSim
                 if (enemyJet.Health <= 0) break;
 
                 // Enemy's turn (simple AI)
-                var enemyWeapon = enemyJet.Weapons.Values.FirstOrDefault(w => w.Quantity > 0);
+                EnemyStrategy strategy = (EnemyStrategy)random.Next(0, 3); // Randomly select a strategy
+                var enemyWeapon = enemyJet.SelectWeapon(strategy);
                 if (enemyWeapon != null && enemyWeapon.Fire())
                 {
                     Console.WriteLine($"{enemyJet.Name} fired {enemyWeapon.Name}!");
@@ -238,11 +270,6 @@ namespace JetFighterCombatSim
             {
                 Console.WriteLine($"{enemyJet.Name} wins!");
             }
-        }
-
-        private static int CalculateDamage(Weapon weapon)
-        {
-            return weapon.BaseDamage * weapon.Accuracy / 100;
         }
     }
 }

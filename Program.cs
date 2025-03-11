@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-
-namespace JetFighterCombatSim
+﻿namespace jet_fighter
 {
     public enum WeaponType
     {
@@ -78,20 +74,19 @@ namespace JetFighterCombatSim
         {
             if (isWestern)
             {
-                // Western aircraft weapons (balanced)
-                Weapons.Add(WeaponType.AIM120_AMRAAM, new Weapon(WeaponType.AIM120_AMRAAM, "AIM-120 AMRAAM", 45, 75, 4, 50, true));
-                Weapons.Add(WeaponType.AIM9X_Sidewinder, new Weapon(WeaponType.AIM9X_Sidewinder, "AIM-9X Sidewinder", 35, 90, 2, 20, true));
-                Weapons.Add(WeaponType.M61A2_Vulcan, new Weapon(WeaponType.M61A2_Vulcan, "M61A2 Vulcan", 25, 50, 500, 2, false));
+                // Slightly reduce Western aircraft weapons while keeping them competitive
+                Weapons.Add(WeaponType.AIM120_AMRAAM, new Weapon(WeaponType.AIM120_AMRAAM, "AIM-120 AMRAAM", 48, 75, 4, 50, true));
+                Weapons.Add(WeaponType.AIM9X_Sidewinder, new Weapon(WeaponType.AIM9X_Sidewinder, "AIM-9X Sidewinder", 40, 90, 2, 22, true));
+                Weapons.Add(WeaponType.M61A2_Vulcan, new Weapon(WeaponType.M61A2_Vulcan, "M61A2 Vulcan", 28, 55, 500, 3, false));
             }
             else
             {
-                // Russian aircraft weapons (balanced to be equivalent but different)
-                Weapons.Add(WeaponType.R77, new Weapon(WeaponType.R77, "R-77", 45, 70, 4, 55, true));
-                Weapons.Add(WeaponType.R73, new Weapon(WeaponType.R73, "R-73", 40, 85, 2, 15, true));
-                Weapons.Add(WeaponType.GSh301, new Weapon(WeaponType.GSh301, "GSh-30-1", 30, 45, 400, 1, false));
+                // Boost Russian aircraft weapons to make the enemy more challenging
+                Weapons.Add(WeaponType.R77, new Weapon(WeaponType.R77, "R-77", 52, 78, 4, 55, true));
+                Weapons.Add(WeaponType.R73, new Weapon(WeaponType.R73, "R-73", 48, 92, 2, 22, true));
+                Weapons.Add(WeaponType.GSh301, new Weapon(WeaponType.GSh301, "GSh-30-1", 32, 60, 400, 2, false));
             }
         }
-
         public void UpdateDistance(JetFighter opponent, int distanceChange)
         {
             Distance = Math.Max(1, Math.Min(150, Distance + distanceChange));
@@ -99,6 +94,59 @@ namespace JetFighterCombatSim
 
         public Weapon SelectBestWeapon(JetFighter opponent, EnemyStrategy strategy)
         {
+            if (!IsPlayer) // Enhanced logic for enemy only
+            {
+                // Get weapons with ammo
+                var weaponsWithAmmo = Weapons.Values.Where(w => w.Quantity > 0).ToList();
+                if (!weaponsWithAmmo.Any())
+                    return new Weapon(WeaponType.M61A2_Vulcan, "Default Weapon", 0, 0, 0, 0, false);
+
+                // Special logic for low player health - go for the kill with highest damage
+                if (opponent.Health < 25)
+                {
+                    var bestDamageWeapon = weaponsWithAmmo
+                        .Where(w => w.Range >= Distance * 0.9) // Within 90% of range to account for movement
+                        .OrderByDescending(w => w.BaseDamage * w.Accuracy / 100.0)
+                        .FirstOrDefault();
+
+                    if (bestDamageWeapon != null)
+                        return bestDamageWeapon;
+                }
+
+                // Filter weapons that are in range (or close to in range)
+                var inRangeWeapons = weaponsWithAmmo.Where(w => w.Range >= Distance * 0.95).ToList();
+
+                // If no weapons in range or close to range, fallback to any weapon
+                if (!inRangeWeapons.Any())
+                    inRangeWeapons = weaponsWithAmmo;
+
+                // Enhanced weapon selection based on strategy and circumstances
+                switch (strategy)
+                {
+                    case EnemyStrategy.Aggressive:
+                        // When aggressive, prioritize damage but consider accuracy too
+                        return inRangeWeapons
+                            .OrderByDescending(w => (w.BaseDamage * 0.7) + (w.Accuracy * 0.3))
+                            .First();
+
+                    case EnemyStrategy.Defensive:
+                        // When defensive, prioritize accuracy and range
+                        return inRangeWeapons
+                            .OrderByDescending(w => (w.Accuracy * 0.6) + (w.Range * 0.4))
+                            .First();
+
+                    case EnemyStrategy.Evasive:
+                        // When evasive, prioritize range
+                        return inRangeWeapons
+                            .OrderByDescending(w => w.Range * 1.5)
+                            .First();
+
+                    default:
+                        return inRangeWeapons.First();
+                }
+            }
+
+            // Original logic for player
             // Filter weapons that are in range and have ammo
             var availableWeapons = Weapons.Values.Where(w => w.Quantity > 0 && w.Range >= Distance).ToList();
 
@@ -112,17 +160,11 @@ namespace JetFighterCombatSim
             switch (strategy)
             {
                 case EnemyStrategy.Aggressive:
-                    // Prioritize highest damage weapons that are in range
-                    return availableWeapons.OrderByDescending(w => w.BaseDamage).First();
-
+                    return availableWeapons.OrderByDescending(w => w.BaseDamage * (w.Accuracy / 50.0)).First();
                 case EnemyStrategy.Defensive:
-                    // Prioritize weapons with best accuracy and range
                     return availableWeapons.OrderByDescending(w => w.Accuracy * (w.Range - Distance)).First();
-
                 case EnemyStrategy.Evasive:
-                    // Try to maintain distance and use long-range weapons
-                    return availableWeapons.OrderByDescending(w => w.Range).First();
-
+                    return availableWeapons.OrderByDescending(w => w.Range * (w.Accuracy / 75.0)).First();
                 default:
                     return availableWeapons.First();
             }
@@ -148,58 +190,124 @@ namespace JetFighterCombatSim
     {
         private static Random random = new Random();
 
-        private static int CalculateDamage(Weapon weapon, int distance)
+        private static int CalculateDamage(Weapon weapon, int distance, bool isEnemyAttack = false)
         {
             // Base calculation
             int minDamage = (int)(weapon.BaseDamage * 0.9);
             int maxDamage = (int)(weapon.BaseDamage * 1.1);
             int baseDamage = random.Next(minDamage, maxDamage + 1);
 
-            // Apply distance modifier
+            // Apply difficulty boost/reduction based on player selection
+            if (isEnemyAttack)
+            {
+                baseDamage = (int)(baseDamage * 1.15); // Increased from 1.05 to 1.15 (15% boost)
+            }
+            else
+            {
+                baseDamage = (int)(baseDamage * 1.05); // Reduced from 1.1 to 1.05 (5% boost for player)
+            }
+
+            // Apply distance modifier with slight advantage to enemy if they're attacking
             double distanceModifier = 1.0;
             if (weapon.Range < distance)
             {
                 // Weapon is out of optimal range
-                distanceModifier = 0.3; // Significant reduction
+                distanceModifier = isEnemyAttack ? 0.4 : 0.3; // Less penalty for enemy
             }
             else if (weapon.Range / 2 > distance && !weapon.RequiresLock)
             {
                 // Short-range weapons (like cannons) are more effective at close range
-                distanceModifier = 1.3;
+                distanceModifier = isEnemyAttack ? 1.35 : 1.25; // More bonus for enemy
             }
             else if (distance < 10 && weapon.RequiresLock)
             {
                 // Missiles are less effective at very close range
-                distanceModifier = 0.7;
+                distanceModifier = isEnemyAttack ? 0.8 : 0.7; // Less penalty for enemy
             }
 
+            // Add a small random factor with slight bias toward enemy when they're attacking
+            double randomFactor = isEnemyAttack ?
+                random.Next(95, 115) / 100.0 :  // 95-115% for enemy
+                random.Next(95, 115) / 100.0;   // 90-110% for player
+
             // Apply final calculation with accuracy and distance modifier
-            return (int)(baseDamage * weapon.Accuracy / 100.0 * distanceModifier);
+            return (int)(baseDamage * weapon.Accuracy / 100.0 * distanceModifier * randomFactor);
         }
 
         private static EnemyStrategy DetermineEnemyStrategy(JetFighter enemy, JetFighter player)
         {
+            // Make the AI adapt to player's health
+            int playerHealthPercent = player.Health;
+
+            // Factor in the distance between aircraft with smarter decisions
+            if (enemy.Distance < 15)
+            {
+                // At close range, be more aggressive, especially if player is weakened
+                return playerHealthPercent < 50 ? EnemyStrategy.Aggressive :
+                    random.Next(0, 100) < 80 ? EnemyStrategy.Aggressive : EnemyStrategy.Defensive;
+            }
+            else if (enemy.Distance > 40)
+            {
+                // At long range, adjust tactics based on health advantage
+                if (enemy.Health > playerHealthPercent + 20)
+                {
+                    // If enemy has health advantage, be aggressive
+                    return EnemyStrategy.Aggressive;
+                }
+                else if (playerHealthPercent > enemy.Health + 20)
+                {
+                    // If player has significant health advantage, be defensive
+                    return EnemyStrategy.Defensive;
+                }
+                else
+                {
+                    // Otherwise mix strategies with bias toward aggression
+                    return random.Next(0, 100) < 60 ? EnemyStrategy.Aggressive : EnemyStrategy.Defensive;
+                }
+            }
+
             // More sophisticated strategy selection based on game state
             if (enemy.Health < 30)
             {
-                // When low on health, favor defensive or evasive strategies
-                return random.Next(0, 100) < 70 ? EnemyStrategy.Defensive : EnemyStrategy.Evasive;
+                // When critically low on health, favor defensive or evasive strategies
+                int choice = random.Next(0, 100);
+                if (choice < 15) return EnemyStrategy.Aggressive;  // Small chance to be aggressive
+                else if (choice < 60) return EnemyStrategy.Defensive;
+                else return EnemyStrategy.Evasive;
             }
-            else if (player.Health < 30)
+            else if (enemy.Health < 60)
             {
-                // When player health is low, be more aggressive
-                return EnemyStrategy.Aggressive;
+                // When moderately damaged, mix of strategies but favor defensive
+                int choice = random.Next(0, 100);
+                if (choice < 30) return EnemyStrategy.Aggressive;
+                else if (choice < 80) return EnemyStrategy.Defensive;
+                else return EnemyStrategy.Evasive;
+            }
+            else if (playerHealthPercent < 40)
+            {
+                // When player health is low, be very aggressive to finish them off
+                return random.Next(0, 100) < 85 ? EnemyStrategy.Aggressive : EnemyStrategy.Defensive;
             }
             else
             {
-                // Mix of strategies in normal conditions
+                // Mix of strategies in normal conditions - more aggressive than before
                 int choice = random.Next(0, 100);
-                if (choice < 40) return EnemyStrategy.Aggressive;
-                else if (choice < 75) return EnemyStrategy.Defensive;
+                if (choice < 55) return EnemyStrategy.Aggressive;  // Increased from 40% to 55%
+                else if (choice < 85) return EnemyStrategy.Defensive;
                 else return EnemyStrategy.Evasive;
             }
         }
 
+        private static string GetDistanceDescription(int distance)
+        {
+            if (distance <= 5) return "extremely close - in visual range";
+            if (distance <= 15) return "at close range";
+            if (distance <= 30) return "at medium range";
+            if (distance <= 60) return "at long range";
+            return "very far away";
+        }
+
+        // Improved HandleManeuvers method with smarter enemy AI
         private static void HandleManeuvers(JetFighter player, JetFighter enemy)
         {
             Console.WriteLine("\nManeuver Options:");
@@ -215,7 +323,6 @@ namespace JetFighterCombatSim
                     break;
                 Console.WriteLine("Invalid choice. Please enter 1, 2, or 3.");
             }
-
             int playerDistanceChange = 0;
             switch (choice)
             {
@@ -224,30 +331,51 @@ namespace JetFighterCombatSim
                 case 3: playerDistanceChange = 15 + random.Next(0, 10); break;    // Increase distance
             }
 
-            // Enemy AI distance response based on strategy
+            // Enemy AI distance response based on strategy - now more adaptive
             EnemyStrategy strategy = DetermineEnemyStrategy(enemy, player);
+
+            // Enemy analyzes optimal range based on their weapons
+            var enemyOptimalWeapon = enemy.SelectBestWeapon(player, strategy);
+            int optimalDistance = enemyOptimalWeapon.Range / 2; // Aim for middle of weapon range
+
             int enemyDistanceChange = 0;
-            switch (strategy)
+
+            // Enemy tries to maintain optimal distance for their chosen weapon
+            if (enemy.Distance < optimalDistance - 10)
             {
-                case EnemyStrategy.Aggressive:
-                    enemyDistanceChange = -10 - random.Next(0, 10); // Try to close distance
-                    break;
-                case EnemyStrategy.Defensive:
-                    enemyDistanceChange = random.Next(-5, 15); // Slight preference for maintaining distance
-                    break;
-                case EnemyStrategy.Evasive:
-                    enemyDistanceChange = 10 + random.Next(0, 10); // Try to increase distance
-                    break;
+                // Too close, try to increase distance
+                enemyDistanceChange = 12 + random.Next(0, 10);
+            }
+            else if (enemy.Distance > optimalDistance + 10)
+            {
+                // Too far, try to decrease distance
+                enemyDistanceChange = -12 - random.Next(0, 10);
+            }
+            else
+            {
+                // Within optimal range, make smaller adjustments based on strategy
+                switch (strategy)
+                {
+                    case EnemyStrategy.Aggressive:
+                        enemyDistanceChange = -5 - random.Next(0, 8);
+                        break;
+                    case EnemyStrategy.Defensive:
+                        enemyDistanceChange = random.Next(-3, 8);
+                        break;
+                    case EnemyStrategy.Evasive:
+                        enemyDistanceChange = 5 + random.Next(0, 8);
+                        break;
+                }
             }
 
-            // Calculate net distance change based on both aircraft's maneuvers and capabilities
-            int netDistanceChange = (playerDistanceChange + enemyDistanceChange) / 2;
+            // Calculate net distance change with a bias toward enemy's maneuver
+            int netDistanceChange = (int)((playerDistanceChange + enemyDistanceChange * 1.4) / 2.4);
             player.UpdateDistance(enemy, netDistanceChange);
-            enemy.Distance = player.Distance; // Both aircraft are at the same distance from each other
+            enemy.Distance = player.Distance;
 
             Console.WriteLine($"Distance is now: {player.Distance}km");
+            Console.WriteLine($"The {enemy.Name} is {GetDistanceDescription(player.Distance)}");
         }
-
         public void ShowMenu(JetFighter jetFighter)
         {
             Console.WriteLine("\n========== Combat Information ==========");
@@ -351,7 +479,7 @@ namespace JetFighterCombatSim
             // Game loop
             while (playerJet.Health > 0 && enemyJet.Health > 0)
             {
-                // Handle distance changes through maneuvers
+                // Use the improved HandleManeuvers method
                 HandleManeuvers(playerJet, enemyJet);
 
                 // Player's turn
@@ -369,6 +497,7 @@ namespace JetFighterCombatSim
                 if (selectedWeapon.Fire())
                 {
                     Console.WriteLine($"Fired {selectedWeapon.Name}!");
+                    // Use regular damage calculation for player
                     int damage = CalculateDamage(selectedWeapon, playerJet.Distance);
                     enemyJet.Health -= damage;
                     playerJet.AddDamage(damage);
@@ -382,7 +511,7 @@ namespace JetFighterCombatSim
 
                 if (enemyJet.Health <= 0) break;
 
-                // Enemy's turn (improved AI)
+                // Enemy's turn with enhanced AI
                 EnemyStrategy strategy = DetermineEnemyStrategy(enemyJet, playerJet);
                 Console.WriteLine($"{enemyJet.Name} uses {strategy} strategy.");
 
@@ -390,7 +519,8 @@ namespace JetFighterCombatSim
                 if (enemyWeapon.Fire())
                 {
                     Console.WriteLine($"{enemyJet.Name} fired {enemyWeapon.Name}!");
-                    int damage = CalculateDamage(enemyWeapon, enemyJet.Distance);
+                    // Pass true for isEnemyAttack to get the enhanced damage
+                    int damage = CalculateDamage(enemyWeapon, enemyJet.Distance, true);
                     playerJet.Health -= damage;
                     enemyJet.AddDamage(damage);
                     attackDetails.Add(new AttackDetail(enemyJet.Name, playerJet.Name, damage, playerJet.Health));

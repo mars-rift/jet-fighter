@@ -106,12 +106,12 @@
             Health = health;
             TotalDamageDealt = 0;
             InitializeCharacteristics(isWestern);
+            InitializeWeapons(isWestern);
             // Store initial countermeasures
             foreach (var cm in Countermeasures)
             {
                 InitialCountermeasures[cm.Key] = cm.Value;
             }
-            InitializeCharacteristics(isWestern);
         }
 
         public void AddDamage(int damage)
@@ -153,7 +153,10 @@
                 StealthRating = 35; // Decent but not as stealthy as F-22
                 Maneuverability = 95; // Better thrust vectoring
                 RadarRange = 140;
-                Countermeasures.Add(CountermeasureType.Chaff, 8);
+                if (!Countermeasures.ContainsKey(CountermeasureType.Chaff))
+                {
+                    Countermeasures.Add(CountermeasureType.Chaff, 8);
+                }
                 Countermeasures.Add(CountermeasureType.Flares, 14);
                 Countermeasures.Add(CountermeasureType.ECM, 6);
             }

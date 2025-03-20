@@ -17,6 +17,13 @@
         Evasive
     }
 
+    public enum CountermeasureType
+    {
+        Chaff,  // Defeats radar-guided missiles
+        Flares, // Defeats heat-seeking missiles
+        ECM     // Electronic countermeasures
+    }
+
     public class Weapon
     {
         public WeaponType Type { get; private set; }
@@ -44,6 +51,31 @@
             Quantity--;
             return true;
         }
+
+        public bool AttemptFire(JetFighter attacker, JetFighter target, int distance)
+        {
+            if (Quantity <= 0) return false;
+            
+            // Check if missile requires lock and can achieve lock
+            if (RequiresLock)
+            {
+                // Calculate detection probability based on range and stealth
+                double detectionModifier = (double)attacker.RadarRange / distance;
+                double stealthModifier = 100.0 / target.StealthRating;
+                
+                // Detection probability - harder to detect stealthy aircraft at range
+                double detectionProbability = detectionModifier * stealthModifier * 0.8;
+                
+                // Apply random factor
+                if (new Random().NextDouble() * 100 > detectionProbability)
+                {
+                    return false; // Failed to achieve lock
+                }
+            }
+            
+            Quantity--;
+            return true;
+        }
     }
     public class JetFighter
     {
@@ -57,12 +89,29 @@
         private bool HasRadarLock { get; set; }
         private static Random random = new Random();
 
+        public int StealthRating { get; private set; } // Lower is stealthier
+        public int Maneuverability { get; private set; } // Higher is better
+        public int RadarRange { get; private set; } // Detection capability
+        public Dictionary<CountermeasureType, int> Countermeasures { get; private set; } = new Dictionary<CountermeasureType, int>();
+        public Dictionary<CountermeasureType, int> InitialCountermeasures { get; private set; } = new Dictionary<CountermeasureType, int>();
+
+        public int MissilesFired { get; private set; } = 0;
+        public int MissilesHit { get; private set; } = 0;
+        public int CannonRoundsFired { get; private set; } = 0;
+        public int WeaponHits { get; private set; } = 0;
+
         public JetFighter(string name, int health, bool isWestern)
         {
             Name = name;
             Health = health;
             TotalDamageDealt = 0;
-            InitializeWeapons(isWestern);
+            InitializeCharacteristics(isWestern);
+            // Store initial countermeasures
+            foreach (var cm in Countermeasures)
+            {
+                InitialCountermeasures[cm.Key] = cm.Value;
+            }
+            InitializeCharacteristics(isWestern);
         }
 
         public void AddDamage(int damage)
@@ -74,19 +123,42 @@
         {
             if (isWestern)
             {
-                // Slightly reduce Western aircraft weapons while keeping them competitive
-                Weapons.Add(WeaponType.AIM120_AMRAAM, new Weapon(WeaponType.AIM120_AMRAAM, "AIM-120 AMRAAM", 48, 75, 4, 50, true));
-                Weapons.Add(WeaponType.AIM9X_Sidewinder, new Weapon(WeaponType.AIM9X_Sidewinder, "AIM-9X Sidewinder", 40, 90, 2, 22, true));
-                Weapons.Add(WeaponType.M61A2_Vulcan, new Weapon(WeaponType.M61A2_Vulcan, "M61A2 Vulcan", 28, 55, 500, 3, false));
+                // F-22 weapons: Better medium range, high accuracy, less raw damage
+                Weapons.Add(WeaponType.AIM120_AMRAAM, new Weapon(WeaponType.AIM120_AMRAAM, "AIM-120D AMRAAM", 45, 85, 6, 55, true));
+                Weapons.Add(WeaponType.AIM9X_Sidewinder, new Weapon(WeaponType.AIM9X_Sidewinder, "AIM-9X Sidewinder", 40, 90, 4, 25, true));
+                Weapons.Add(WeaponType.M61A2_Vulcan, new Weapon(WeaponType.M61A2_Vulcan, "M61A2 Vulcan", 28, 60, 480, 3, false));
             }
             else
             {
-                // Boost Russian aircraft weapons to make the enemy more challenging
-                Weapons.Add(WeaponType.R77, new Weapon(WeaponType.R77, "R-77", 52, 78, 4, 55, true));
-                Weapons.Add(WeaponType.R73, new Weapon(WeaponType.R73, "R-73", 48, 92, 2, 22, true));
-                Weapons.Add(WeaponType.GSh301, new Weapon(WeaponType.GSh301, "GSh-30-1", 32, 60, 400, 2, false));
+                // Su-57 weapons: Higher damage, slightly lower accuracy, better close-range
+                Weapons.Add(WeaponType.R77, new Weapon(WeaponType.R77, "R-77M", 50, 80, 6, 50, true));
+                Weapons.Add(WeaponType.R73, new Weapon(WeaponType.R73, "R-73M", 45, 85, 4, 30, true));
+                Weapons.Add(WeaponType.GSh301, new Weapon(WeaponType.GSh301, "GSh-30-1", 35, 55, 450, 2, false));
             }
         }
+
+        private void InitializeCharacteristics(bool isWestern)
+        {
+            if (isWestern) // F-22
+            {
+                StealthRating = 20; // Very stealthy
+                Maneuverability = 85;
+                RadarRange = 160;
+                Countermeasures.Add(CountermeasureType.Chaff, 6);
+                Countermeasures.Add(CountermeasureType.Flares, 12);
+                Countermeasures.Add(CountermeasureType.ECM, 8);
+            }
+            else // Su-57
+            {
+                StealthRating = 35; // Decent but not as stealthy as F-22
+                Maneuverability = 95; // Better thrust vectoring
+                RadarRange = 140;
+                Countermeasures.Add(CountermeasureType.Chaff, 8);
+                Countermeasures.Add(CountermeasureType.Flares, 14);
+                Countermeasures.Add(CountermeasureType.ECM, 6);
+            }
+        }
+
         public void UpdateDistance(JetFighter opponent, int distanceChange)
         {
             Distance = Math.Max(1, Math.Min(150, Distance + distanceChange));
@@ -169,6 +241,15 @@
                     return availableWeapons.First();
             }
         }
+
+        public bool DeployCountermeasure(CountermeasureType type)
+        {
+            if (!Countermeasures.ContainsKey(type) || Countermeasures[type] <= 0)
+                return false;
+                
+            Countermeasures[type]--;
+            return true;
+        }
     }
 
     public class AttackDetail
@@ -190,48 +271,47 @@
     {
         private static Random random = new Random();
 
-        private static int CalculateDamage(Weapon weapon, int distance, bool isEnemyAttack = false)
+        private static int CalculateDamage(Weapon weapon, JetFighter attacker, JetFighter target, int distance)
         {
             // Base calculation
-            int minDamage = (int)(weapon.BaseDamage * 0.9);
-            int maxDamage = (int)(weapon.BaseDamage * 1.1);
+            int minDamage = (int)(weapon.BaseDamage * 0.8);
+            int maxDamage = (int)(weapon.BaseDamage * 1.2);
             int baseDamage = random.Next(minDamage, maxDamage + 1);
-
-            // Apply difficulty boost/reduction based on player selection
-            if (isEnemyAttack)
+            
+            // Calculate hit probability based on accuracy, distance, and target maneuverability
+            double baseHitChance = weapon.Accuracy / 100.0;
+            double distanceFactor = Math.Min(1.0, weapon.Range / (double)distance);
+            double maneuverabilityPenalty = target.Maneuverability / 200.0; // Higher maneuverability = harder to hit
+            
+            double hitChance = baseHitChance * distanceFactor * (1.0 - maneuverabilityPenalty);
+            
+            // Random roll to see if weapon hits
+            if (random.NextDouble() > hitChance)
             {
-                baseDamage = (int)(baseDamage * 1.15); // Increased from 1.05 to 1.15 (15% boost)
+                // Missed the target
+                return 0;
             }
-            else
-            {
-                baseDamage = (int)(baseDamage * 1.05); // Reduced from 1.1 to 1.05 (5% boost for player)
-            }
-
-            // Apply distance modifier with slight advantage to enemy if they're attacking
+            
+            // Apply distance modifier for damage
             double distanceModifier = 1.0;
             if (weapon.Range < distance)
             {
-                // Weapon is out of optimal range
-                distanceModifier = isEnemyAttack ? 0.4 : 0.3; // Less penalty for enemy
+                distanceModifier = 0.3; // Significant penalty for out-of-range shots
             }
             else if (weapon.Range / 2 > distance && !weapon.RequiresLock)
             {
-                // Short-range weapons (like cannons) are more effective at close range
-                distanceModifier = isEnemyAttack ? 1.35 : 1.25; // More bonus for enemy
+                // Short-range weapons are more effective at close range
+                distanceModifier = 1.4;
             }
             else if (distance < 10 && weapon.RequiresLock)
             {
                 // Missiles are less effective at very close range
-                distanceModifier = isEnemyAttack ? 0.8 : 0.7; // Less penalty for enemy
+                distanceModifier = 0.7;
             }
-
-            // Add a small random factor with slight bias toward enemy when they're attacking
-            double randomFactor = isEnemyAttack ?
-                random.Next(95, 115) / 100.0 :  // 95-115% for enemy
-                random.Next(95, 115) / 100.0;   // 90-110% for player
-
-            // Apply final calculation with accuracy and distance modifier
-            return (int)(baseDamage * weapon.Accuracy / 100.0 * distanceModifier * randomFactor);
+            
+            // Apply final calculation
+            double finalDamage = baseDamage * distanceModifier;
+            return (int)Math.Max(1, finalDamage);
         }
 
         private static EnemyStrategy DetermineEnemyStrategy(JetFighter enemy, JetFighter player)
@@ -307,75 +387,110 @@
             return "very far away";
         }
 
-        // Improved HandleManeuvers method with smarter enemy AI
         private static void HandleManeuvers(JetFighter player, JetFighter enemy)
         {
             Console.WriteLine("\nManeuver Options:");
-            Console.WriteLine("1. Close in (decrease distance)");
-            Console.WriteLine("2. Maintain distance");
-            Console.WriteLine("3. Increase distance");
+            Console.WriteLine("1. Close in aggressively (decrease distance significantly)");
+            Console.WriteLine("2. Close in cautiously (decrease distance slightly)");
+            Console.WriteLine("3. Maintain distance");
+            Console.WriteLine("4. Increase distance slightly");
+            Console.WriteLine("5. Disengage (increase distance significantly)");
+            Console.WriteLine($"Current distance: {player.Distance}km | {GetDistanceDescription(player.Distance)}");
 
             int choice;
             while (true)
             {
                 string? input = Console.ReadLine();
-                if (int.TryParse(input, out choice) && choice >= 1 && choice <= 3)
+                if (int.TryParse(input, out choice) && choice >= 1 && choice <= 5)
                     break;
-                Console.WriteLine("Invalid choice. Please enter 1, 2, or 3.");
+                Console.WriteLine("Invalid choice. Please enter a number between 1 and 5.");
             }
-            int playerDistanceChange = 0;
+            
+            // Calculate player distance change based on maneuverability
+            int baseDistanceChange;
             switch (choice)
             {
-                case 1: playerDistanceChange = -15 - random.Next(0, 10); break;   // Close distance
-                case 2: playerDistanceChange = random.Next(-5, 6); break;         // Maintain
-                case 3: playerDistanceChange = 15 + random.Next(0, 10); break;    // Increase distance
+                case 1: baseDistanceChange = -20; break;   // Close aggressively
+                case 2: baseDistanceChange = -10; break;   // Close cautiously
+                case 3: baseDistanceChange = 0; break;     // Maintain
+                case 4: baseDistanceChange = 10; break;    // Increase slightly
+                case 5: baseDistanceChange = 20; break;    // Disengage
+                default: baseDistanceChange = 0; break;
             }
-
-            // Enemy AI distance response based on strategy - now more adaptive
+            
+            // Apply maneuverability factor - higher maneuverability makes moves more effective
+            int playerDistanceChange = (int)(baseDistanceChange * (player.Maneuverability / 80.0));
+            playerDistanceChange += random.Next(-3, 4); // Small random component
+            
+            // Enemy AI distance response with consideration for aircraft capabilities
             EnemyStrategy strategy = DetermineEnemyStrategy(enemy, player);
-
-            // Enemy analyzes optimal range based on their weapons
             var enemyOptimalWeapon = enemy.SelectBestWeapon(player, strategy);
-            int optimalDistance = enemyOptimalWeapon.Range / 2; // Aim for middle of weapon range
-
-            int enemyDistanceChange = 0;
-
-            // Enemy tries to maintain optimal distance for their chosen weapon
-            if (enemy.Distance < optimalDistance - 10)
+            int optimalDistance = enemyOptimalWeapon.Range / 2;
+            
+            int enemyBaseDistanceChange = 0;
+            
+            // Advanced distance management for enemy
+            if (enemy.Distance < optimalDistance - 15)
             {
-                // Too close, try to increase distance
-                enemyDistanceChange = 12 + random.Next(0, 10);
+                // Way too close, try to increase distance significantly
+                enemyBaseDistanceChange = 15;
             }
-            else if (enemy.Distance > optimalDistance + 10)
+            else if (enemy.Distance < optimalDistance - 5)
             {
-                // Too far, try to decrease distance
-                enemyDistanceChange = -12 - random.Next(0, 10);
+                // Too close, increase slightly
+                enemyBaseDistanceChange = 8;
+            }
+            else if (enemy.Distance > optimalDistance + 15)
+            {
+                // Way too far, decrease significantly
+                enemyBaseDistanceChange = -15;
+            }
+            else if (enemy.Distance > optimalDistance + 5)
+            {
+                // Too far, decrease slightly
+                enemyBaseDistanceChange = -8;
             }
             else
             {
                 // Within optimal range, make smaller adjustments based on strategy
                 switch (strategy)
                 {
-                    case EnemyStrategy.Aggressive:
-                        enemyDistanceChange = -5 - random.Next(0, 8);
-                        break;
-                    case EnemyStrategy.Defensive:
-                        enemyDistanceChange = random.Next(-3, 8);
-                        break;
-                    case EnemyStrategy.Evasive:
-                        enemyDistanceChange = 5 + random.Next(0, 8);
-                        break;
+                    case EnemyStrategy.Aggressive: enemyBaseDistanceChange = -5; break;
+                    case EnemyStrategy.Defensive: enemyBaseDistanceChange = 3; break;
+                    case EnemyStrategy.Evasive: enemyBaseDistanceChange = 7; break;
                 }
             }
-
-            // Calculate net distance change with a bias toward enemy's maneuver
-            int netDistanceChange = (int)((playerDistanceChange + enemyDistanceChange * 1.4) / 2.4);
+            
+            // Apply enemy maneuverability factor
+            int enemyDistanceChange = (int)(enemyBaseDistanceChange * (enemy.Maneuverability / 80.0));
+            enemyDistanceChange += random.Next(-3, 4); // Small random component
+            
+            // Calculate net distance change considering both aircraft's actions
+            // Aircraft with better maneuverability has more influence on the outcome
+            double playerInfluence = player.Maneuverability / (double)(player.Maneuverability + enemy.Maneuverability);
+            double enemyInfluence = 1.0 - playerInfluence;
+            
+            int netDistanceChange = (int)((playerDistanceChange * playerInfluence) + (enemyDistanceChange * enemyInfluence));
+            
             player.UpdateDistance(enemy, netDistanceChange);
             enemy.Distance = player.Distance;
-
+            
             Console.WriteLine($"Distance is now: {player.Distance}km");
             Console.WriteLine($"The {enemy.Name} is {GetDistanceDescription(player.Distance)}");
+            
+            // Report on enemy activity
+            if (enemyDistanceChange < -5)
+                Console.WriteLine($"The {enemy.Name} is aggressively closing in!");
+            else if (enemyDistanceChange < 0)
+                Console.WriteLine($"The {enemy.Name} is moving closer.");
+            else if (enemyDistanceChange > 5)
+                Console.WriteLine($"The {enemy.Name} is attempting to disengage!");
+            else if (enemyDistanceChange > 0)
+                Console.WriteLine($"The {enemy.Name} is increasing distance.");
+            else
+                Console.WriteLine($"The {enemy.Name} is maintaining position.");
         }
+
         public void ShowMenu(JetFighter jetFighter)
         {
             Console.WriteLine("\n========== Combat Information ==========");
@@ -420,16 +535,77 @@
             Console.WriteLine($"{playerJet.Name}: {playerJet.TotalDamageDealt}");
             Console.WriteLine($"{enemyJet.Name}: {enemyJet.TotalDamageDealt}");
 
+            Console.WriteLine("\nCombat Statistics:");
+            Console.WriteLine($"{playerJet.Name} Accuracy: {CalculateAccuracy(playerJet)}%");
+            Console.WriteLine($"{enemyJet.Name} Accuracy: {CalculateAccuracy(enemyJet)}%");
+            Console.WriteLine($"Total Attacks: {attackDetails.Count}");
+            Console.WriteLine($"Average Damage per Attack: {attackDetails.Average(d => d.Damage):F1}");
+            
+            Console.WriteLine("\nCountermeasures Used:");
+            foreach (CountermeasureType cm in Enum.GetValues(typeof(CountermeasureType)))
+            {
+                int playerInitial = playerJet.Countermeasures.ContainsKey(cm) ? 
+                    playerJet.InitialCountermeasures[cm] : 0;
+                int playerRemaining = playerJet.Countermeasures.ContainsKey(cm) ?
+                    playerJet.Countermeasures[cm] : 0;
+                    
+                int enemyInitial = enemyJet.Countermeasures.ContainsKey(cm) ?
+                    enemyJet.InitialCountermeasures[cm] : 0;
+                int enemyRemaining = enemyJet.Countermeasures.ContainsKey(cm) ?
+                    enemyJet.Countermeasures[cm] : 0;
+                    
+                Console.WriteLine($"{cm}: Player used {playerInitial - playerRemaining}, " +
+                                 $"Enemy used {enemyInitial - enemyRemaining}");
+            }
+            
+            // Game outcome
             Console.WriteLine("\nGame Over!");
             if (playerJet.Health > 0)
             {
-                Console.WriteLine($"{playerJet.Name} wins!");
+                Console.WriteLine($"{playerJet.Name} wins with {playerJet.Health} health remaining!");
             }
             else
             {
-                Console.WriteLine($"{enemyJet.Name} wins!");
+                Console.WriteLine($"{enemyJet.Name} wins with {enemyJet.Health} health remaining!");
             }
         }
+
+        private double CalculateAccuracy(JetFighter jet)
+        {
+            int totalShots = jet.MissilesFired + (jet.CannonRoundsFired / 10); // Count every 10 cannon rounds as 1 "shot"
+            int totalHits = jet.MissilesHit + (jet.WeaponHits - jet.MissilesHit);
+            
+            if (totalShots == 0) return 0;
+            return (totalHits / (double)totalShots) * 100;
+        }
+
+        public static bool AttemptCountermeasure(JetFighter defender, Weapon incomingWeapon)
+        {
+            // AI logic to decide when to use countermeasures
+            if (!defender.IsPlayer && new Random().Next(100) < 75) // 75% chance AI will try countermeasures
+            {
+                CountermeasureType bestType;
+                
+                // Choose appropriate countermeasure based on weapon type
+                if (incomingWeapon.Type == WeaponType.AIM120_AMRAAM || incomingWeapon.Type == WeaponType.R77)
+                    bestType = CountermeasureType.Chaff; // Radar-guided missiles
+                else if (incomingWeapon.Type == WeaponType.AIM9X_Sidewinder || incomingWeapon.Type == WeaponType.R73)
+                    bestType = CountermeasureType.Flares; // IR-guided missiles
+                else
+                    bestType = CountermeasureType.ECM; // Default
+
+                if (defender.DeployCountermeasure(bestType))
+                {
+                    // Calculate evasion chance based on defender's maneuverability
+                    double evasionChance = defender.Maneuverability * 0.7 / 100.0;
+                    return new Random().NextDouble() < evasionChance;
+                }
+            }
+            
+            // For player, countermeasure choice is manual (handled elsewhere)
+            return false;
+        }
+
         static void Main(string[] args)
         {
             Console.WriteLine("Choose your jet:");
@@ -498,7 +674,7 @@
                 {
                     Console.WriteLine($"Fired {selectedWeapon.Name}!");
                     // Use regular damage calculation for player
-                    int damage = CalculateDamage(selectedWeapon, playerJet.Distance);
+                    int damage = CalculateDamage(selectedWeapon, playerJet, enemyJet, playerJet.Distance);
                     enemyJet.Health -= damage;
                     playerJet.AddDamage(damage);
                     attackDetails.Add(new AttackDetail(playerJet.Name, enemyJet.Name, damage, enemyJet.Health));
@@ -520,7 +696,7 @@
                 {
                     Console.WriteLine($"{enemyJet.Name} fired {enemyWeapon.Name}!");
                     // Pass true for isEnemyAttack to get the enhanced damage
-                    int damage = CalculateDamage(enemyWeapon, enemyJet.Distance, true);
+                    int damage = CalculateDamage(enemyWeapon, enemyJet, playerJet, enemyJet.Distance);
                     playerJet.Health -= damage;
                     enemyJet.AddDamage(damage);
                     attackDetails.Add(new AttackDetail(enemyJet.Name, playerJet.Name, damage, playerJet.Health));

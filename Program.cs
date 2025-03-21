@@ -253,6 +253,26 @@
             Countermeasures[type]--;
             return true;
         }
+
+        public void IncrementMissilesFired()
+        {
+            MissilesFired++;
+        }
+
+        public void IncrementMissilesHit()
+        {
+            MissilesHit++;
+        }
+
+        public void IncrementCannonRoundsFired()
+        {
+            CannonRoundsFired += 10; // Assuming each cannon "shot" represents 10 rounds
+        }
+
+        public void IncrementWeaponHits()
+        {
+            WeaponHits++;
+        }
     }
 
     public class AttackDetail
@@ -276,6 +296,13 @@
 
         private static int CalculateDamage(Weapon weapon, JetFighter attacker, JetFighter target, int distance)
         {
+            // Track firing statistics
+            if (weapon.RequiresLock) {
+                attacker.IncrementMissilesFired();
+            } else {
+                attacker.IncrementCannonRoundsFired();
+            }
+            
             // Base calculation
             int minDamage = (int)(weapon.BaseDamage * 0.8);
             int maxDamage = (int)(weapon.BaseDamage * 1.2);
@@ -294,6 +321,12 @@
                 // Missed the target
                 return 0;
             }
+            
+            // Record weapon hit
+            if (weapon.RequiresLock) {
+                attacker.IncrementMissilesHit();
+            }
+            attacker.IncrementWeaponHits();
             
             // Apply distance modifier for damage
             double distanceModifier = 1.0;
@@ -676,12 +709,28 @@
                 if (selectedWeapon.Fire())
                 {
                     Console.WriteLine($"Fired {selectedWeapon.Name}!");
-                    // Use regular damage calculation for player
-                    int damage = CalculateDamage(selectedWeapon, playerJet, enemyJet, playerJet.Distance);
-                    enemyJet.Health -= damage;
-                    playerJet.AddDamage(damage);
-                    attackDetails.Add(new AttackDetail(playerJet.Name, enemyJet.Name, damage, enemyJet.Health));
-                    Console.WriteLine($"{enemyJet.Name} took {damage} damage. Remaining health: {enemyJet.Health}");
+                    
+                    // Allow enemy to use countermeasures for missiles that require lock
+                    bool evaded = false;
+                    if (selectedWeapon.RequiresLock)
+                    {
+                        evaded = AttemptCountermeasure(enemyJet, selectedWeapon);
+                        if (evaded)
+                        {
+                            Console.WriteLine($"{enemyJet.Name} deployed countermeasures and evaded your attack!");
+                            playerJet.IncrementMissilesFired(); // Still count as fired even if evaded
+                        }
+                    }
+                    
+                    // Only calculate damage if not evaded
+                    if (!evaded)
+                    {
+                        int damage = CalculateDamage(selectedWeapon, playerJet, enemyJet, playerJet.Distance);
+                        enemyJet.Health -= damage;
+                        playerJet.AddDamage(damage);
+                        attackDetails.Add(new AttackDetail(playerJet.Name, enemyJet.Name, damage, enemyJet.Health));
+                        Console.WriteLine($"{enemyJet.Name} took {damage} damage. Remaining health: {enemyJet.Health}");
+                    }
                 }
                 else
                 {
@@ -698,12 +747,102 @@
                 if (enemyWeapon.Fire())
                 {
                     Console.WriteLine($"{enemyJet.Name} fired {enemyWeapon.Name}!");
-                    // Pass true for isEnemyAttack to get the enhanced damage
-                    int damage = CalculateDamage(enemyWeapon, enemyJet, playerJet, enemyJet.Distance);
-                    playerJet.Health -= damage;
-                    enemyJet.AddDamage(damage);
-                    attackDetails.Add(new AttackDetail(enemyJet.Name, playerJet.Name, damage, playerJet.Health));
-                    Console.WriteLine($"{playerJet.Name} took {damage} damage. Remaining health: {playerJet.Health}");
+                    
+                    // Allow player to use countermeasures if the weapon requires lock
+                    bool evaded = false;
+                    if (enemyWeapon.RequiresLock)
+                    {
+                        Console.WriteLine("\nIncoming missile! Deploy countermeasures?");
+                        Console.WriteLine("1. Deploy Chaff (effective against radar-guided missiles)");
+                        Console.WriteLine("2. Deploy Flares (effective against heat-seeking missiles)");
+                        Console.WriteLine("3. Use ECM (electronic countermeasures)");
+                        Console.WriteLine("4. Attempt evasive maneuvers (no countermeasures)");
+                        Console.WriteLine($"Chaff: {playerJet.Countermeasures[CountermeasureType.Chaff]} | Flares: {playerJet.Countermeasures[CountermeasureType.Flares]} | ECM: {playerJet.Countermeasures[CountermeasureType.ECM]}");
+                        
+                        int cmChoice;
+                        while (true)
+                        {
+                            string? input = Console.ReadLine();
+                            if (int.TryParse(input, out cmChoice) && cmChoice >= 1 && cmChoice <= 4)
+                                break;
+                            Console.WriteLine("Invalid choice. Please enter a number between 1 and 4.");
+                        }
+                        
+                        CountermeasureType type = CountermeasureType.Chaff;
+                        bool deployed = false;
+                        
+                        switch(cmChoice)
+                        {
+                            case 1: 
+                                deployed = playerJet.DeployCountermeasure(CountermeasureType.Chaff);
+                                type = CountermeasureType.Chaff;
+                                break;
+                            case 2: 
+                                deployed = playerJet.DeployCountermeasure(CountermeasureType.Flares);
+                                type = CountermeasureType.Flares;
+                                break;
+                            case 3: 
+                                deployed = playerJet.DeployCountermeasure(CountermeasureType.ECM);
+                                type = CountermeasureType.ECM;
+                                break;
+                            case 4:
+                                // No countermeasures, just evasion chance
+                                break;
+                        }
+                        
+                        if (deployed)
+                        {
+                            Console.WriteLine($"Deployed {type}!");
+                            double effectivenessModifier = 1.0;
+                            
+                            // Different countermeasures are effective against different weapons
+                            if ((type == CountermeasureType.Chaff && 
+                                 (enemyWeapon.Type == WeaponType.AIM120_AMRAAM || enemyWeapon.Type == WeaponType.R77)) ||
+                                (type == CountermeasureType.Flares && 
+                                 (enemyWeapon.Type == WeaponType.AIM9X_Sidewinder || enemyWeapon.Type == WeaponType.R73)))
+                            {
+                                effectivenessModifier = 1.5; // More effective against appropriate missile type
+                            }
+                            
+                            // Calculate evasion chance based on countermeasure effectiveness and maneuverability
+                            double evasionChance = (playerJet.Maneuverability * 0.5 / 100.0) * effectivenessModifier;
+                            if (random.NextDouble() < evasionChance)
+                            {
+                                evaded = true;
+                                Console.WriteLine("Countermeasures successful! Missile evaded!");
+                            }
+                            else
+                            {
+                                Console.WriteLine("Countermeasures failed to divert the missile!");
+                            }
+                        }
+                        else if (cmChoice != 4)
+                        {
+                            Console.WriteLine($"No {type} countermeasures available!");
+                        }
+                        else
+                        {
+                            // Just evasive maneuvers, lower chance of success
+                            double evasionChance = playerJet.Maneuverability * 0.2 / 100.0;
+                            if (random.NextDouble() < evasionChance)
+                            {
+                                evaded = true;
+                                Console.WriteLine("You performed an incredible evasive maneuver and dodged the missile!");
+                            }
+                        }
+                        
+                        enemyJet.IncrementMissilesFired(); // Count missile as fired even if evaded
+                    }
+                    
+                    // Only calculate damage if not evaded
+                    if (!evaded)
+                    {
+                        int damage = CalculateDamage(enemyWeapon, enemyJet, playerJet, enemyJet.Distance);
+                        playerJet.Health -= damage;
+                        enemyJet.AddDamage(damage);
+                        attackDetails.Add(new AttackDetail(enemyJet.Name, playerJet.Name, damage, playerJet.Health));
+                        Console.WriteLine($"{playerJet.Name} took {damage} damage. Remaining health: {playerJet.Health}");
+                    }
                 }
                 else
                 {

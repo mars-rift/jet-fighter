@@ -69,10 +69,20 @@
         // Modify weapon accuracy based on weather
         public double GetAccuracyModifier(Weapon weapon)
         {
-            if (weapon.RequiresLock && CurrentWeather != WeatherCondition.Clear)
-                return 0.8; // 20% penalty for lock-on weapons in bad weather
-                
-            return 1.0;
+            // More nuanced weather effects
+            switch (CurrentWeather)
+            {
+                case WeatherCondition.Clear:
+                    return 1.0;
+                case WeatherCondition.Cloudy:
+                    return weapon.RequiresLock ? 0.85 : 0.95; // 15% penalty for missiles, 5% for guns
+                case WeatherCondition.Storm:
+                    return weapon.RequiresLock ? 0.70 : 0.80; // 30% penalty for missiles, 20% for guns
+                case WeatherCondition.Fog:
+                    return weapon.RequiresLock ? 0.75 : 0.65; // 25% penalty for missiles, 35% for guns (fog affects visual more)
+                default:
+                    return 0.9; // Default 10% penalty
+            }
         }
     }
 
@@ -226,14 +236,14 @@
                 // F-22 weapons: Better medium range, high accuracy, less raw damage
                 Weapons.Add(WeaponType.AIM120_AMRAAM, new Weapon(WeaponType.AIM120_AMRAAM, "AIM-120D AMRAAM", 75, 85, 6, 55, true)); // From 45 to 65
                 Weapons.Add(WeaponType.AIM9X_Sidewinder, new Weapon(WeaponType.AIM9X_Sidewinder, "AIM-9X Sidewinder", 65, 90, 4, 25, true)); // From 40 to 55
-                Weapons.Add(WeaponType.M61A2_Vulcan, new Weapon(WeaponType.M61A2_Vulcan, "M61A2 Vulcan", 40, 60, 480, 3, false)); // From 28 to 35
+                Weapons.Add(WeaponType.M61A2_Vulcan, new Weapon(WeaponType.M61A2_Vulcan, "M61A2 Vulcan", 50, 75, 400, 3, false)); // From 28 to 35
             }
             else
             {
                 // Su-57 weapons: Higher damage, slightly lower accuracy, better close-range
                 Weapons.Add(WeaponType.R77, new Weapon(WeaponType.R77, "R-77M", 70, 80, 6, 50, true)); // From 50 to 70
                 Weapons.Add(WeaponType.R73, new Weapon(WeaponType.R73, "R-73M", 60, 85, 4, 30, true)); // From 45 to 60
-                Weapons.Add(WeaponType.GSh301, new Weapon(WeaponType.GSh301, "GSh-30-1", 40, 55, 450, 2, false)); // From 35 to 40
+                Weapons.Add(WeaponType.GSh301, new Weapon(WeaponType.GSh301, "GSh-30-1", 55, 75, 300, 2, false)); // From 35 to 40
             }
         }
 
@@ -400,7 +410,7 @@
         public PatrolAirspace()
         {
             Name = "Patrol Airspace";
-            Description = "Monitor designated area for 10 turns";
+            Description = "Monitor designated area for  turns";
             Objective = MissionObjective.PatrolAirspace;
             RemainingTurns = 10;
         }
@@ -1058,8 +1068,8 @@
             else {
                 // ADD THIS: Player damage bonus to balance combat
                 if (weapon.RequiresLock) { // Only missiles get the bonus
-                    finalDamage *= 1.6;   // 60% more damage for player missiles
-                    hitChance *= 1.4;     // 40% better hit chance for player
+                    finalDamage *= 2.0;   // 100% more damage for player missiles (up from 60%)
+                    hitChance *= 1.6;     // 60% better hit chance for player (up from 40%)
                 }
                 else {
                     finalDamage *= 1.2;   // 20% more damage for player cannon
@@ -1068,7 +1078,7 @@
                 
                 // Ensure player missiles do significant damage when they hit
                 if (finalDamage > 0 && weapon.RequiresLock)
-                    finalDamage = Math.Max(finalDamage, weapon.BaseDamage * 0.8);
+                    finalDamage = Math.Max(finalDamage, weapon.BaseDamage * 1.0); // Guaranteed minimum base damage
             }
             
             // Random roll to see if weapon hits
@@ -1226,14 +1236,14 @@
 
         private static void HandleCriticalHit(JetFighter target, Weapon weapon)
         {
-            // Increased critical chance for player
-            int baseChance = target.IsPlayer ? 15 : 25; // 15% for AI, 25% for player
+            // MODIFIED: Better critical chances
+            int baseChance = target.IsPlayer ? 12 : 30; // Reduced for AI (15% → 12%), increased for player (25% → 30%)
             
             if (weapon.RequiresLock)
-                baseChance += 10; // Extra 10% for missiles
+                baseChance += 10; // Keep extra 10% for missiles
                 
             if (target.Health < 50)
-                baseChance += 5; // Extra 5% when target is damaged
+                baseChance += 8; // Increased from 5% to 8% when target is damaged
             
             if (JetFighter.random.Next(100) < baseChance)
             {

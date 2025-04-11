@@ -105,9 +105,22 @@
 
             if (damage > 0)
             {
-                string hitVerb = weapon.RequiresLock ?
-                    missileHitDescriptions[JetFighter.random.Next(missileHitDescriptions.Length)] :
-                    cannonHitDescriptions[JetFighter.random.Next(cannonHitDescriptions.Length)];
+                // Vary description based on relative damage magnitude
+                string hitVerb;
+                if (damage > weapon.BaseDamage * 1.1)
+                {
+                    // For heavy hits
+                    hitVerb = weapon.RequiresLock ?
+                        missileHitDescriptions[JetFighter.random.Next(0, 3)] : // Use more dramatic descriptions
+                        cannonHitDescriptions[JetFighter.random.Next(0, 3)];
+                }
+                else
+                {
+                    // For normal hits
+                    hitVerb = weapon.RequiresLock ?
+                        missileHitDescriptions[JetFighter.random.Next(3, missileHitDescriptions.Length)] :
+                        cannonHitDescriptions[JetFighter.random.Next(3, cannonHitDescriptions.Length)];
+                }
 
                 string location = impactLocations[JetFighter.random.Next(impactLocations.Length)];
 
@@ -331,29 +344,30 @@
 
         public Weapon SelectBestWeapon(EnemyStrategy strategy)
         {
-            // Example logic for selecting the best weapon based on strategy
+            // First select weapons that are in range
+            var inRangeWeapons = Weapons.Values.Where(w => w.Quantity > 0 && w.Range >= Distance).ToList();
+            
+            // If no weapons in range, get any weapon with ammo
+            if (!inRangeWeapons.Any())
+                inRangeWeapons = Weapons.Values.Where(w => w.Quantity > 0).ToList();
+            
+            // If still no weapons, throw exception
+            if (!inRangeWeapons.Any())
+                throw new InvalidOperationException("No weapons available to select.");
+            
+            // Based on strategy, pick the best weapon
             if (strategy == EnemyStrategy.Aggressive)
             {
-                return Weapons.Values.FirstOrDefault(w => w.Quantity > 0 && w.RequiresLock)
-                       ?? Weapons.Values.FirstOrDefault(w => w.Quantity > 0)
-                       ?? throw new InvalidOperationException("No weapons available to select.");
+                return inRangeWeapons.FirstOrDefault(w => w.RequiresLock) ?? inRangeWeapons.First();
             }
             else if (strategy == EnemyStrategy.Defensive)
             {
-                return Weapons.Values.FirstOrDefault(w => w.Quantity > 0 && !w.RequiresLock)
-                       ?? Weapons.Values.FirstOrDefault(w => w.Quantity > 0)
-                       ?? throw new InvalidOperationException("No weapons available to select.");
+                return inRangeWeapons.FirstOrDefault(w => !w.RequiresLock) ?? inRangeWeapons.First();
             }
-            else if (strategy == EnemyStrategy.Evasive)
+            else // Evasive
             {
-                return Weapons.Values.FirstOrDefault(w => w.Quantity > 0 && w.Range > Distance)
-                       ?? Weapons.Values.FirstOrDefault(w => w.Quantity > 0)
-                       ?? throw new InvalidOperationException("No weapons available to select.");
+                return inRangeWeapons.OrderByDescending(w => w.Range).FirstOrDefault() ?? inRangeWeapons.First();
             }
-
-            // Default fallback to ensure a weapon is always returned
-            return Weapons.Values.FirstOrDefault(w => w.Quantity > 0)
-                   ?? throw new InvalidOperationException("No weapons available to select.");
         }
 
        
@@ -472,7 +486,8 @@
         
         public override bool CheckCompletion(JetFighter player, JetFighter enemy)
         {
-            // Gather intel when close but not too close
+            // Only gather intel when not in the same turn as a failed finishing move
+            // Add a bool parameter to track if we're checking after a failed finishing move
             if (player.Distance < 60 && player.Distance > 30)
             {
                 IntelGathered++;
@@ -552,6 +567,8 @@
         private readonly WeatherSystem _weatherSystem = new();
         private readonly Mission _currentMission;
         private readonly Program _programUI; // Reference to UI methods
+        private bool _missedFinishingMoveThisTurn; // Add this flag
+        private bool _executingFinishingMove = false; // Add this field
         
         public GameController(JetFighter player, JetFighter enemy, Mission mission)
         {
@@ -597,8 +614,24 @@
 
                 DisplayCombatProgress();
 
-                // Apply mission logic
-                _currentMission.CheckCompletion(_player, _enemy);
+                // Apply mission logic but don't check completion if we just missed a finishing move
+                bool missionComplete = false;
+                if (!_missedFinishingMoveThisTurn)
+                {
+                    missionComplete = _currentMission.CheckCompletion(_player, _enemy);
+                    if (missionComplete)
+                    {
+                        Console.WriteLine("\nMission objectives completed!");
+                        Console.WriteLine("Press any key to continue...");
+                        Console.ReadKey();
+                        break;
+                    }
+                }
+                else
+                {
+                    // Reset flag for next turn
+                    _missedFinishingMoveThisTurn = false;
+                }
 
                 // Wait for user input before continuing to the next turn
                 Console.WriteLine("\nPress any key to continue to the next turn...");
@@ -670,6 +703,7 @@
         private void ProcessPlayerTurn()
         {
             bool skipAttack = false;
+            bool missedFinishingMove = false; // Add this flag
             
             // Check if any weapons are in range
             bool weaponsInRange = _player.Weapons.Values.Any(w => w.Range >= _player.Distance && w.Quantity > 0);
@@ -719,67 +753,74 @@
                 if (weaponChoice == 0)
                 {
                     Console.WriteLine("You decide to hold your fire this turn.");
-                    return;
-                }
-                
-                // Continue with existing weapon firing code
-                var weapon = _player.Weapons.Values.ElementAt(weaponChoice - 1);
-                
-                if (weapon.AttemptFire(_player, _enemy, _player.Distance))
-                {
-                    // Calculate damage directly without countermeasure checks
-                    int damage = CalculateDamage(weapon, _player, _enemy, _player.Distance);
-                    _enemy.Health -= damage;
-                    _player.AddDamage(damage);
-                    
-                    // Add combat narrative
-                    AddCombatNarrative(_player, _enemy, weapon, damage);
-
-                    // Chance of critical hit
-                    if (damage > 0)
-                        HandleCriticalHit(_enemy, weapon);
-
-                    // Create attack record
-                    _attackDetails.Add(new AttackDetail(_player.Name, _enemy.Name, damage, _enemy.Health));
-                    
-                    Console.WriteLine($"You fired {weapon.Name} and dealt {damage} damage!");
-
-                    // Check for excellent hit
-                    if (damage > weapon.BaseDamage * 1.1)
-                    {
-                        Console.ForegroundColor = ConsoleColor.Magenta;
-                        Console.WriteLine("EXCELLENT HIT! The target takes massive damage!");
-                        Console.ResetColor();
-                    }
+                    skipAttack = true; // Set flag instead of returning
                 }
                 else
                 {
-                    Console.WriteLine($"Failed to fire {weapon.Name} - weapon out of ammo or failed to achieve lock!");
-                }
-
-                if (_enemy.Health < 25) // If enemy is nearly defeated
-                {
-                    Console.WriteLine("\nEnemy aircraft is heavily damaged! Attempt finishing move?");
-                    Console.WriteLine("1. Yes - Higher damage but might miss");
-                    Console.WriteLine("2. No - Continue normal attack");
-
-                    if (int.TryParse(Console.ReadLine(), out int finishChoice) && finishChoice == 1)
+                    // Continue with weapon firing...
+                    var weapon = _player.Weapons.Values.ElementAt(weaponChoice - 1);
+                    
+                    if (weapon.AttemptFire(_player, _enemy, _player.Distance))
                     {
-                        Console.WriteLine("You line up for the kill shot...");
-                        if (JetFighter.random.Next(100) < 70) // 70% chance to succeed
+                        // Calculate damage directly without countermeasure checks
+                        int damage = CalculateDamage(weapon, _player, _enemy, _player.Distance);
+                        _enemy.Health -= damage;
+                        _player.AddDamage(damage);
+                        
+                        // Add combat narrative
+                        AddCombatNarrative(_player, _enemy, weapon, damage);
+
+                        // Chance of critical hit
+                        if (damage > 0)
+                            HandleCriticalHit(_enemy, weapon);
+
+                        // Create attack record
+                        _attackDetails.Add(new AttackDetail(_player.Name, _enemy.Name, damage, _enemy.Health));
+                        
+                        Console.WriteLine($"You fired {weapon.Name} and dealt {damage} damage!");
+
+                        // Check for excellent hit
+                        if (damage > weapon.BaseDamage * 1.1)
                         {
-                            int finishingDamage = Math.Min(100, _enemy.Health + JetFighter.random.Next(10, 30));
-                            _enemy.Health = 0;
-                            Console.ForegroundColor = ConsoleColor.Green;
-                            Console.WriteLine($"FINISHING STRIKE! You deliver a devastating {finishingDamage} damage, destroying the enemy aircraft!");
+                            Console.ForegroundColor = ConsoleColor.Magenta;
+                            Console.WriteLine("EXCELLENT HIT! The target takes massive damage!");
                             Console.ResetColor();
-                            return;
                         }
-                        else
+
+                        if (_enemy.Health < 25) // If enemy is nearly defeated
                         {
-                            Console.WriteLine("You missed the critical shot! The enemy aircraft manages to evade at the last second.");
-                            return;
+                            Console.WriteLine("\nEnemy aircraft is heavily damaged! Attempt finishing move?");
+                            Console.WriteLine("1. Yes - Higher damage but might miss");
+                            Console.WriteLine("2. No - Continue normal attack");
+
+                            if (int.TryParse(Console.ReadLine(), out int finishChoice) && finishChoice == 1)
+                            {
+                                Console.WriteLine("You line up for the kill shot...");
+                                _executingFinishingMove = true; // Set flag for damage calculation
+                                
+                                if (JetFighter.random.Next(100) < 70) // 70% chance to succeed
+                                {
+                                    // Finishing move success logic
+                                    int finishingDamage = Math.Min(100, _enemy.Health + JetFighter.random.Next(10, 30));
+                                    _enemy.Health = 0;
+                                    Console.ForegroundColor = ConsoleColor.Green;
+                                    Console.WriteLine($"FINISHING STRIKE! You deliver a devastating {finishingDamage} damage, destroying the enemy aircraft!");
+                                    Console.ResetColor();
+                                    return; // Keep this return
+                                }
+                                else
+                                {
+                                    // Missed finishing move logic
+                                    Console.WriteLine("You missed the critical shot! The enemy aircraft manages to evade at the last second.");
+                                    missedFinishingMove = true;
+                                }
+                                _executingFinishingMove = false; // Reset flag
+                            }
                         }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Failed to fire {weapon.Name} - weapon out of ammo or failed to achieve lock!");
                     }
                 }
             }
@@ -816,6 +857,9 @@
 
             // Apply distance change
             ApplyDistanceChange(_player, _enemy, distanceChange);
+            
+            // Pass the flag to game controller
+            _missedFinishingMoveThisTurn = missedFinishingMove;
         }
         
         private void ProcessEnemyTurn()
@@ -854,21 +898,30 @@
                 
                 AddCombatNarrative(_enemy, _player, weapon, damage);
 
-                // Chance of critical hit
+                // Only display hit messages if there was actual damage
                 if (damage > 0)
+                {
+                    // Chance of critical hit
                     HandleCriticalHit(_player, weapon);
 
-                // Create attack record
-                _attackDetails.Add(new AttackDetail(_enemy.Name, _player.Name, damage, _player.Health));
-                
-                Console.WriteLine($"Enemy fired {weapon.Name} and dealt {damage} damage!");
+                    // Create attack record
+                    _attackDetails.Add(new AttackDetail(_enemy.Name, _player.Name, damage, _player.Health));
+                    
+                    Console.WriteLine($"Enemy fired {weapon.Name} and dealt {damage} damage!");
 
-                // Check for excellent hit
-                if (damage > weapon.BaseDamage * 1.1)
+                    // Check for excellent hit
+                    if (damage > weapon.BaseDamage * 1.1)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Magenta;
+                        Console.WriteLine("EXCELLENT HIT! The target takes massive damage!");
+                        Console.ResetColor();
+                    }
+                }
+                else
                 {
-                    Console.ForegroundColor = ConsoleColor.Magenta;
-                    Console.WriteLine("EXCELLENT HIT! The target takes massive damage!");
-                    Console.ResetColor();
+                    Console.WriteLine($"Enemy fired {weapon.Name} but failed to cause significant damage!");
+                    // Still record the attack with 0 damage
+                    _attackDetails.Add(new AttackDetail(_enemy.Name, _player.Name, 0, _player.Health));
                 }
             }
             else
@@ -961,13 +1014,13 @@
             
             // MODIFY to give AI even more bonus
             if (!attacker.IsPlayer) {
-                // Much stronger AI damage bonus
-                finalDamage *= 1.5; // 50% more damage when enemy attacks
-                hitChance *= 1.3;   // 30% better hit chance
+                // Stronger AI to make it a worthy opponent
+                finalDamage *= 2.0; // Match the player's 2.0 missile bonus
+                hitChance *= 1.6;   // Match the player's 1.6 accuracy bonus
                 
-                // Add minimum damage for AI to ensure some damage occurs
+                // Higher minimum damage for AI
                 if (finalDamage > 0)
-                    finalDamage = Math.Max(finalDamage, weapon.BaseDamage * 0.5);
+                    finalDamage = Math.Max(finalDamage, weapon.BaseDamage * 0.8); // Up from 0.6
             }
             else {
                 // ADD THIS: Player damage bonus to balance combat
@@ -1010,7 +1063,15 @@
             // Update target's capabilities based on system damage
             UpdateSystemEffects(target);
             
-            return (int)healthDamage;
+            // Add a damage cap for non-finishing moves when enemy is nearly defeated
+            if (target.Health < 25 && !_executingFinishingMove) {
+                // Cap damage to prevent instant kills when player declined finishing move
+                finalDamage = Math.Min(finalDamage, target.Health - 1);
+                finalDamage = Math.Max(5, finalDamage); // Ensure at least 5 damage
+            }
+            
+            // ADD THIS LINE - it's missing!
+            return healthDamage;
         }
 
         private static AircraftSystem DetermineTargetSystem(Weapon weapon)
@@ -1125,8 +1186,18 @@
             }
             else if (playerHealthPercent < 40)
             {
-                // When player health is low, be EXTREMELY aggressive
-                return JetFighter.random.Next(0, 100) < 95 ? EnemyStrategy.Aggressive : EnemyStrategy.Defensive;
+                // When player health is low, be EXTREMELY aggressive and prioritize finishing the player
+                if (enemy.Distance > 15 && enemy.Weapons.Values.Any(w => w.RequiresLock && w.Quantity > 0))
+                {
+                    // Use missile attacks when at medium/long range
+                    return EnemyStrategy.Aggressive;
+                }
+                else if (enemy.Distance <= 15)
+                {
+                    // Use cannons at close range
+                    return EnemyStrategy.Defensive; // Defensive prioritizes non-lock weapons
+                }
+                return EnemyStrategy.Aggressive; // Default to aggressive
             }
             else
             {
@@ -1140,8 +1211,8 @@
 
         private static void HandleCriticalHit(JetFighter target, Weapon weapon)
         {
-            // MODIFIED: Better critical chances
-            int baseChance = target.IsPlayer ? 12 : 30; // Reduced for AI (15% → 12%), increased for player (25% → 30%)
+            // More balanced critical hit chances
+            int baseChance = target.IsPlayer ? 20 : 25; // More balanced (12% → 20% for AI, 30% → 25% for player)
             
             if (weapon.RequiresLock)
                 baseChance += 10; // Keep extra 10% for missiles

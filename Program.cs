@@ -253,6 +253,7 @@
         public Dictionary<AircraftSystem, int> SystemHealth { get; private set; } = [];
 
         public int Altitude { get; set; } = 30000; // Initial altitude in feet
+        public int Fuel { get; set; } = 100; // New: Fuel system
 
         public Pilot? Pilot { get; private set; }
 
@@ -330,11 +331,15 @@
         public void UpdateDistance(int distanceChange)
         {
             Distance = Math.Max(1, Math.Min(150, Distance + distanceChange));
+            // Realism: Fuel cost for maneuvering
+            Fuel = Math.Max(0, Fuel - Math.Abs(distanceChange) / 2);
         }
 
         public void UpdateAltitude(int altitudeChange)
         {
             Altitude = Math.Max(1000, Math.Min(60000, Altitude + altitudeChange));
+            // Realism: Fuel cost for climbing/diving
+            Fuel = Math.Max(0, Fuel - Math.Abs(altitudeChange) / 1000);
         }
 
         public void UpdateRadarRange(int newRange)
@@ -826,38 +831,46 @@
             }
 
             // Always present the movement options
-            // Add distance change option
-            Console.WriteLine("\nDo you want to change the distance?");
+            Console.WriteLine($"\nFuel remaining: {_player.Fuel}%");
+            Console.WriteLine($"Current Altitude: {_player.Altitude} ft");
+            Console.WriteLine("Do you want to change the distance?");
             Console.WriteLine("1. Move Closer");
             Console.WriteLine("2. Move Away");
             Console.WriteLine("3. Maintain Distance");
-
+            Console.WriteLine("4. Change Altitude");
             int distanceChoice;
             while (true)
             {
                 string? input = Console.ReadLine();
-                if (int.TryParse(input, out distanceChoice) && (distanceChoice >= 1 && distanceChoice <= 3))
+                if (int.TryParse(input, out distanceChoice) && (distanceChoice >= 1 && distanceChoice <= 4))
                     break;
-                Console.WriteLine("Invalid choice. Please enter 1, 2, or 3.");
+                Console.WriteLine("Invalid choice. Please enter 1, 2, 3, or 4.");
             }
-
             int distanceChange = 0;
-            switch (distanceChoice)
+            if (distanceChoice == 1)
+                distanceChange = -10;
+            else if (distanceChoice == 2)
+                distanceChange = 10;
+            else if (distanceChoice == 3)
+                distanceChange = 0;
+            else if (distanceChoice == 4)
             {
-                case 1:
-                    distanceChange = -10; // Move closer
-                    break;
-                case 2:
-                    distanceChange = 10;  // Move away
-                    break;
-                case 3:
-                    distanceChange = 0;  // Maintain distance
-                    break;
+                Console.WriteLine("Enter new altitude (1000-60000 ft):");
+                int newAlt = _player.Altitude;
+                while (true)
+                {
+                    string? altInput = Console.ReadLine();
+                    if (int.TryParse(altInput, out newAlt) && newAlt >= 1000 && newAlt <= 60000)
+                        break;
+                    Console.WriteLine("Invalid altitude. Enter a value between 1000 and 60000.");
+                }
+                _player.UpdateAltitude(newAlt - _player.Altitude);
+                Console.WriteLine($"Altitude changed to {_player.Altitude} ft.");
             }
-
-            // Apply distance change
-            ApplyDistanceChange(_player, _enemy, distanceChange);
-            
+            if (distanceChoice != 4)
+            {
+                ApplyDistanceChange(_player, _enemy, distanceChange);
+            }
             // Pass the flag to game controller
             _missedFinishingMoveThisTurn = missedFinishingMove;
         }
@@ -1012,30 +1025,32 @@
                 hitChance /= evasionSkill; // Harder to hit with better evasion
             }
             
-            // MODIFY to give AI even more bonus
+            // IMPROVED AI: Make AI as strong as player, but with a slight random bonus for realism
             if (!attacker.IsPlayer) {
-                // Stronger AI to make it a worthy opponent
-                finalDamage *= 2.0; // Match the player's 2.0 missile bonus
-                hitChance *= 1.6;   // Match the player's 1.6 accuracy bonus
-                
-                // Higher minimum damage for AI
-                if (finalDamage > 0)
-                    finalDamage = Math.Max(finalDamage, weapon.BaseDamage * 0.8); // Up from 0.6
-            }
-            else {
-                // ADD THIS: Player damage bonus to balance combat
-                if (weapon.RequiresLock) { // Only missiles get the bonus
-                    finalDamage *= 2.0;   // 100% more damage for player missiles (up from 60%)
-                    hitChance *= 1.6;     // 60% better hit chance for player (up from 40%)
+                // AI gets same bonuses as player
+                if (weapon.RequiresLock) {
+                    finalDamage *= 2.0;
+                    hitChance *= 1.6;
+                } else {
+                    finalDamage *= 1.2;
+                    hitChance *= 1.1;
                 }
-                else {
-                    finalDamage *= 1.2;   // 20% more damage for player cannon
-                    hitChance *= 1.1;     // 10% better hit chance for player cannon
-                }
-                
-                // Ensure player missiles do significant damage when they hit
+                // AI minimum damage for missiles
                 if (finalDamage > 0 && weapon.RequiresLock)
-                    finalDamage = Math.Max(finalDamage, weapon.BaseDamage * 1.0); // Guaranteed minimum base damage
+                    finalDamage = Math.Max(finalDamage, weapon.BaseDamage * 1.0);
+                // AI gets a small random bonus to simulate unpredictability
+                finalDamage *= (1.0 + JetFighter.random.NextDouble() * 0.15); // up to +15% random
+            } else {
+                // Player bonuses
+                if (weapon.RequiresLock) {
+                    finalDamage *= 2.0;
+                    hitChance *= 1.6;
+                } else {
+                    finalDamage *= 1.2;
+                    hitChance *= 1.1;
+                }
+                if (finalDamage > 0 && weapon.RequiresLock)
+                    finalDamage = Math.Max(finalDamage, weapon.BaseDamage * 1.0);
             }
             
             // Random roll to see if weapon hits
@@ -1066,12 +1081,29 @@
             // Add a damage cap for non-finishing moves when enemy is nearly defeated
             if (target.Health < 25 && !_executingFinishingMove) {
                 // Cap damage to prevent instant kills when player declined finishing move
-                finalDamage = Math.Min(finalDamage, target.Health - 1);
+                finalDamage = Math.Min(finalDamage, Math.Max(target.Health - 1, 1));
                 finalDamage = Math.Max(5, finalDamage); // Ensure at least 5 damage
             }
-            
-            // ADD THIS LINE - it's missing!
-            return healthDamage;
+            // Realism: Altitude effects
+            if (attacker.Altitude < 5000) {
+                finalDamage *= 0.8; // Low altitude, less missile effectiveness
+            } else if (attacker.Altitude > 40000) {
+                finalDamage *= 0.9; // High altitude, less cannon effectiveness
+            }
+            // Realism: Fuel system (affects damage if low)
+            if (attacker is JetFighter jet) {
+                if (jet.Fuel < 20) {
+                    finalDamage *= 0.7; // Low fuel, less power
+                }
+            }
+            // Realism: Random system failures
+            if (target.SystemHealth[AircraftSystem.Engine] < 20 && JetFighter.random.Next(100) < 10) {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"{target.Name}'s engine sputters! Emergency power lost.");
+                Console.ResetColor();
+                finalDamage *= 1.2; // Easier to finish off a crippled jet
+            }
+            return (int)Math.Round(healthDamage > 0 ? finalDamage * 0.5 : 0);
         }
 
         private static AircraftSystem DetermineTargetSystem(Weapon weapon)
@@ -1137,76 +1169,37 @@
 
         private static EnemyStrategy DetermineEnemyStrategy(JetFighter enemy, JetFighter player)
         {
-            // Make the AI adapt to player's health
+            // Make the AI adapt to player's health and its own health
             int playerHealthPercent = player.Health;
+            int enemyHealthPercent = enemy.Health;
 
-            // Factor in the distance between aircraft with smarter decisions
+            // If player is low, AI goes for the kill
+            if (playerHealthPercent < 30 && enemyHealthPercent > 20)
+                return EnemyStrategy.Aggressive;
+
+            // If AI is low, it will try to evade or defend
+            if (enemyHealthPercent < 25)
+                return JetFighter.random.Next(0, 100) < 60 ? EnemyStrategy.Evasive : EnemyStrategy.Defensive;
+
+            // If both are healthy, AI mixes strategies
             if (enemy.Distance < 15)
-            {
-                // At close range, be more aggressive, especially if player is weakened
-                return playerHealthPercent < 50 ? EnemyStrategy.Aggressive :
-                    JetFighter.random.Next(0, 100) < 80 ? EnemyStrategy.Aggressive : EnemyStrategy.Defensive;
-            }
-            else if (enemy.Distance > 40)
-            {
-                // At long range, adjust tactics based on health advantage
-                if (enemy.Health > playerHealthPercent + 20)
-                {
-                    // If enemy has health advantage, be aggressive
-                    return EnemyStrategy.Aggressive;
-                }
-                else if (playerHealthPercent > enemy.Health + 20)
-                {
-                    // If player has significant health advantage, be defensive
-                    return EnemyStrategy.Defensive;
-                }
-                else
-                {
-                    // Otherwise mix strategies with bias toward aggression
-                    return JetFighter.random.Next(0, 100) < 60 ? EnemyStrategy.Aggressive : EnemyStrategy.Defensive;
-                }
-            }
+                return JetFighter.random.Next(0, 100) < 70 ? EnemyStrategy.Aggressive : EnemyStrategy.Defensive;
+            if (enemy.Distance > 40)
+                return JetFighter.random.Next(0, 100) < 60 ? EnemyStrategy.Aggressive : EnemyStrategy.Defensive;
 
-            // More sophisticated strategy selection based on game state
-            if (enemy.Health < 30)
-            {
-                // When critically low on health, favor defensive or evasive strategies
-                int choice = JetFighter.random.Next(0, 100);
-                if (choice < 15) return EnemyStrategy.Aggressive;  // Small chance to be aggressive
-                else if (choice < 60) return EnemyStrategy.Defensive;
-                else return EnemyStrategy.Evasive;
-            }
-            else if (enemy.Health < 60)
-            {
-                // When moderately damaged, mix of strategies but favor defensive
-                int choice = JetFighter.random.Next(0, 100);
-                if (choice < 30) return EnemyStrategy.Aggressive;
-                else if (choice < 80) return EnemyStrategy.Defensive;
-                else return EnemyStrategy.Evasive;
-            }
-            else if (playerHealthPercent < 40)
-            {
-                // When player health is low, be EXTREMELY aggressive and prioritize finishing the player
-                if (enemy.Distance > 15 && enemy.Weapons.Values.Any(w => w.RequiresLock && w.Quantity > 0))
-                {
-                    // Use missile attacks when at medium/long range
-                    return EnemyStrategy.Aggressive;
-                }
-                else if (enemy.Distance <= 15)
-                {
-                    // Use cannons at close range
-                    return EnemyStrategy.Defensive; // Defensive prioritizes non-lock weapons
-                }
-                return EnemyStrategy.Aggressive; // Default to aggressive
-            }
-            else
-            {
-                // Mix of strategies in normal conditions - MUCH more aggressive
-                int choice = JetFighter.random.Next(0, 100);
-                if (choice < 85) return EnemyStrategy.Aggressive;  // INCREASED from 70% to 85%
-                else if (choice < 95) return EnemyStrategy.Defensive;
-                else return EnemyStrategy.Evasive;
-            }
+            // If AI has health advantage, be aggressive
+            if (enemyHealthPercent > playerHealthPercent + 20)
+                return EnemyStrategy.Aggressive;
+
+            // If player has health advantage, be defensive
+            if (playerHealthPercent > enemyHealthPercent + 20)
+                return EnemyStrategy.Defensive;
+
+            // Otherwise, random mix
+            int choice = JetFighter.random.Next(0, 100);
+            if (choice < 60) return EnemyStrategy.Aggressive;
+            if (choice < 85) return EnemyStrategy.Defensive;
+            return EnemyStrategy.Evasive;
         }
 
         private static void HandleCriticalHit(JetFighter target, Weapon weapon)
